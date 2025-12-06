@@ -699,7 +699,7 @@ export default function Page() {
       {/* 🎨 Cooler Master RGB dark background wrapper */}
       <Box
         sx={{
-          minHeight: "90dvh",
+          minHeight: "100dvh",
           backgroundImage: `
             radial-gradient(900px 500px at 110% -10%, rgba(124,58,237,.35), transparent 60%),
             radial-gradient(800px 600px at -10% 110%, rgba(34,211,238,.28), transparent 55%),
