@@ -1479,7 +1479,7 @@ export default function Page() {
           >
             <Box
               sx={{
-                minHeight: "100dvh",
+                minHeight: "90dvh",
                 color: "white",
                 display: "grid",
                 gridTemplateRows: "auto 1fr auto",
