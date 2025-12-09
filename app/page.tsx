@@ -158,12 +158,19 @@ const appTheme = createTheme({
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 const bi = (vi: string, zh: string) => `${vi} ${zh}`;
 
-// helper detect "Giải Nhất"
-const isFirstPrizeTitle = (title: string) =>
-  title.toLowerCase().includes("giải nhất") ||
-  title.toLowerCase().includes("giai nhat") ||
-  title.includes("一等") ||
-  title.includes("一等獎");
+// ✅ helper detect "Giải cao nhất" để bắn mega fireworks
+const isFirstPrizeTitle = (title: string) => {
+  const t = title.toLowerCase();
+  return (
+    t.includes("giải nhất") ||
+    t.includes("giai nhat") ||
+    t.includes("giải đặc biệt") ||
+    t.includes("giai dac biet") ||
+    title.includes("一等") ||
+    title.includes("一等獎") ||
+    title.includes("特別大獎")
+  );
+};
 
 export default function Page() {
   const isMobile = useMediaQuery("(max-width:600px)");
@@ -171,11 +178,18 @@ export default function Page() {
   const [participantsText, setParticipantsText] = useState<string>(
     "CM001 - Nguyễn Văn A\nCM002 - Trần Thị B\nCM003 - Lê Văn C\nCM004 - Phạm Thị D"
   );
+
+  // ✅ Default prizes theo ảnh
   const [prizes, setPrizes] = useState<Prize[]>([
-    { id: uid(), title: bi("Giải Nhất", "一等獎"), quantity: 1 },
-    { id: uid(), title: bi("Giải Nhì", "二等獎"), quantity: 2 },
-    { id: uid(), title: bi("Giải Ba", "三等獎"), quantity: 3 },
+    { id: uid(), title: bi("Giải Đặc Biệt", "特別大獎"), quantity: 1 },
+    { id: uid(), title: bi("Giải Kim Cương", "頭獎"), quantity: 3 },
+    { id: uid(), title: bi("Giải Vàng", "金獎"), quantity: 4 },
+    { id: uid(), title: bi("Giải Bạc", "銀獎"), quantity: 10 },
+    { id: uid(), title: bi("Giải Đồng", "銅獎"), quantity: 30 },
+    { id: uid(), title: bi("Giải May Mắn", "幸運獎"), quantity: 30 },
+    { id: uid(), title: bi("Giải Vui Vẻ", "歡樂獎"), quantity: 45 },
   ]);
+
   const [selectedPrizeId, setSelectedPrizeId] =
     useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -525,6 +539,7 @@ export default function Page() {
 
   // ===== ACTIONS =====
   const startRoll = async () => {
+    if (isDrawing) return; // ✅ đang bốc thì không cho bấm nữa
     if (!selectedPrize) return;
     if (drawnPrizeIds.has(selectedPrize.id)) {
       setToast({
@@ -631,7 +646,7 @@ export default function Page() {
         } catch {}
       }
 
-      // ✅ confetti nhỏ mỗi winner (bắn đúng dialog nếu đang present)
+      // ✅ confetti nhỏ mỗi winner
       try {
         fire({
           particleCount: 240,
@@ -664,7 +679,7 @@ export default function Page() {
       ...h,
     ]);
 
-    // ✅ mega fireworks chỉ khi vừa bốc xong GIẢI NHẤT
+    // ✅ mega fireworks chỉ khi bốc xong giải cao nhất
     if (isFirstPrizeTitle(selectedPrize.title)) {
       megaFireworks();
     } else {
@@ -1005,9 +1020,7 @@ export default function Page() {
                         labelId="admin-prize-label"
                         label={bi("Giải", "獎項")}
                         value={adminPrizeId ?? ""}
-                        onChange={(e) =>
-                          setAdminPrizeId(String(e.target.value))
-                        }
+                        onChange={(e) => setAdminPrizeId(String(e.target.value))}
                       >
                         {prizes.map((p) => (
                           <MenuItem key={p.id} value={p.id}>
@@ -1148,9 +1161,7 @@ export default function Page() {
                               <Button
                                 size="small"
                                 variant="text"
-                                onClick={() =>
-                                  !isDrawn && setSelectedPrizeId(p.id)
-                                }
+                                onClick={() => !isDrawn && setSelectedPrizeId(p.id)}
                                 disabled={isDrawn}
                               >
                                 {isDrawn ? (
@@ -1283,7 +1294,9 @@ export default function Page() {
                       size={isMobile ? "medium" : "large"}
                       onClick={startRoll}
                       disabled={
-                        !selectedPrize ? true : drawnPrizeIds.has(selectedPrize.id)
+                        !selectedPrize ||
+                        isDrawing || // ✅ disable khi đang bốc
+                        drawnPrizeIds.has(selectedPrize.id) // ✅ disable khi đã bốc xong giải này
                       }
                       sx={{
                         background:
@@ -1419,11 +1432,7 @@ export default function Page() {
         </Container>
 
         {/* ===== Presentation Mode ===== */}
-        <Dialog
-          open={presentOpen}
-          onClose={() => setPresentOpen(false)}
-          fullScreen
-        >
+        <Dialog open={presentOpen} onClose={() => setPresentOpen(false)} fullScreen>
           <AppBar
             sx={{
               position: "relative",
@@ -1516,7 +1525,11 @@ export default function Page() {
                 color="inherit"
                 startIcon={<PlayCircleOutlineIcon />}
                 onClick={startRoll}
-                disabled={!selectedPrize}
+                disabled={
+                  !selectedPrize ||
+                  isDrawing ||
+                  (selectedPrize ? drawnPrizeIds.has(selectedPrize.id) : false)
+                }
                 sx={{ fontWeight: 900 }}
               >
                 {bi("Bốc ngay", "立即抽獎")}
@@ -1833,7 +1846,11 @@ export default function Page() {
                   size="large"
                   startIcon={<PlayCircleOutlineIcon />}
                   onClick={startRoll}
-                  disabled={!selectedPrize}
+                  disabled={
+                    !selectedPrize ||
+                    isDrawing ||
+                    (selectedPrize ? drawnPrizeIds.has(selectedPrize.id) : false)
+                  }
                   sx={{
                     background:
                       "linear-gradient(90deg, #7C3AED 0%, #22D3EE 50%, #EC4899 100%)",
