@@ -158,6 +158,17 @@ const appTheme = createTheme({
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 const bi = (vi: string, zh: string) => `${vi} ${zh}`;
 
+// ✅ Default prizes (ID cố định để merge)
+const DEFAULT_PRIZES: Prize[] = [
+  { id: "p-special", title: bi("Giải Đặc Biệt", "特別大獎"), quantity: 1 },
+  { id: "p-diamond", title: bi("Giải Kim Cương", "頭獎"), quantity: 3 },
+  { id: "p-gold", title: bi("Giải Vàng", "金獎"), quantity: 4 },
+  { id: "p-silver", title: bi("Giải Bạc", "銀獎"), quantity: 10 },
+  { id: "p-bronze", title: bi("Giải Đồng", "銅獎"), quantity: 30 },
+  { id: "p-lucky", title: bi("Giải May Mắn", "幸運獎"), quantity: 30 },
+  { id: "p-happy", title: bi("Giải Vui Vẻ", "歡樂獎"), quantity: 45 },
+];
+
 // ✅ helper detect "Giải cao nhất" để bắn mega fireworks
 const isFirstPrizeTitle = (title: string) => {
   const t = title.toLowerCase();
@@ -179,16 +190,8 @@ export default function Page() {
     "CM001 - Nguyễn Văn A\nCM002 - Trần Thị B\nCM003 - Lê Văn C\nCM004 - Phạm Thị D"
   );
 
-  // ✅ Default prizes theo ảnh
-  const [prizes, setPrizes] = useState<Prize[]>([
-    { id: uid(), title: bi("Giải Đặc Biệt", "特別大獎"), quantity: 1 },
-    { id: uid(), title: bi("Giải Kim Cương", "頭獎"), quantity: 3 },
-    { id: uid(), title: bi("Giải Vàng", "金獎"), quantity: 4 },
-    { id: uid(), title: bi("Giải Bạc", "銀獎"), quantity: 10 },
-    { id: uid(), title: bi("Giải Đồng", "銅獎"), quantity: 30 },
-    { id: uid(), title: bi("Giải May Mắn", "幸運獎"), quantity: 30 },
-    { id: uid(), title: bi("Giải Vui Vẻ", "歡樂獎"), quantity: 45 },
-  ]);
+  // ✅ luôn khởi tạo từ DEFAULT
+  const [prizes, setPrizes] = useState<Prize[]>(DEFAULT_PRIZES);
 
   const [selectedPrizeId, setSelectedPrizeId] =
     useState<string | null>(null);
@@ -217,15 +220,32 @@ export default function Page() {
 
     const s = loadState();
     if (!s) {
-      setSelectedPrizeId((prev) => prev ?? (prizes[0]?.id ?? null));
-      setAdminPrizeId((prev) => prev ?? (prizes[0]?.id ?? null));
+      // ✅ Không có storage -> dùng DEFAULT
+      setPrizes(DEFAULT_PRIZES);
+      setSelectedPrizeId(DEFAULT_PRIZES[0]?.id ?? null);
+      setAdminPrizeId(DEFAULT_PRIZES[0]?.id ?? null);
     } else {
       setParticipantsText(s.participantsText ?? "");
-      setPrizes(s.prizes ?? []);
-      setSelectedPrizeId(s.selectedPrizeId ?? s.prizes?.[0]?.id ?? null);
-      setAdminPrizeId(s.selectedPrizeId ?? s.prizes?.[0]?.id ?? null);
       setHistory(s.history ?? []);
       setSeed(s.seed ?? Date.now());
+
+      // ✅ merge DEFAULT + saved prizes
+      const saved = s.prizes ?? [];
+      const savedMap = new Map(saved.map((p) => [p.id, p]));
+
+      // giữ default luôn tồn tại
+      const mergedDefaults = DEFAULT_PRIZES.map((d) => savedMap.get(d.id) ?? d);
+
+      // các giải user tự thêm (không thuộc default) vẫn được giữ
+      const extraCustom = saved.filter(
+        (p) => !DEFAULT_PRIZES.some((d) => d.id === p.id)
+      );
+
+      const finalPrizes = [...mergedDefaults, ...extraCustom];
+      setPrizes(finalPrizes);
+
+      setSelectedPrizeId(s.selectedPrizeId ?? finalPrizes[0]?.id ?? null);
+      setAdminPrizeId(s.selectedPrizeId ?? finalPrizes[0]?.id ?? null);
     }
 
     const ss = loadSecretState();
@@ -1161,7 +1181,9 @@ export default function Page() {
                               <Button
                                 size="small"
                                 variant="text"
-                                onClick={() => !isDrawn && setSelectedPrizeId(p.id)}
+                                onClick={() =>
+                                  !isDrawn && setSelectedPrizeId(p.id)
+                                }
                                 disabled={isDrawn}
                               >
                                 {isDrawn ? (
@@ -1295,8 +1317,8 @@ export default function Page() {
                       onClick={startRoll}
                       disabled={
                         !selectedPrize ||
-                        isDrawing || // ✅ disable khi đang bốc
-                        drawnPrizeIds.has(selectedPrize.id) // ✅ disable khi đã bốc xong giải này
+                        isDrawing ||
+                        drawnPrizeIds.has(selectedPrize.id)
                       }
                       sx={{
                         background:
