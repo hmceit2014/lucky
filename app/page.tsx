@@ -158,16 +158,48 @@ const appTheme = createTheme({
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 const bi = (vi: string, zh: string) => `${vi} ${zh}`;
 
-// ✅ Default prizes (ID cố định để merge)
+// ✅ Default prizes (ID cố định để merge) — NEW IDs
 const DEFAULT_PRIZES: Prize[] = [
-  { id: "p-special", title: bi("Giải Đặc Biệt", "特別大獎"), quantity: 1 },
-  { id: "p-diamond", title: bi("Giải Kim Cương", "頭獎"), quantity: 3 },
-  { id: "p-gold", title: bi("Giải Vàng", "金獎"), quantity: 4 },
-  { id: "p-silver", title: bi("Giải Bạc", "銀獎"), quantity: 10 },
-  { id: "p-bronze", title: bi("Giải Đồng", "銅獎"), quantity: 30 },
-  { id: "p-lucky", title: bi("Giải May Mắn", "幸運獎"), quantity: 30 },
-  { id: "p-happy", title: bi("Giải Vui Vẻ", "歡樂獎"), quantity: 45 },
+  { id: "sp-01", title: bi("Giải Đặc Biệt 1", "特別獎 1"), quantity: 1 },
+  { id: "sp-02", title: bi("Giải Đặc Biệt 2", "特別獎 2"), quantity: 1 },
+
+  { id: "1st-01", title: bi("Giải Nhất", "一等獎"), quantity: 5 },
+  { id: "2nd-01", title: bi("Giải Nhì", "二等獎"), quantity: 10 },
+  { id: "3rd-01", title: bi("Giải Ba", "三等獎"), quantity: 20 },
+
+  { id: "4th-01", title: bi("Giải Khuyến Khích", "四等獎"), quantity: 20 },
+  { id: "4th-02", title: bi("Giải Khuyến Khích", "四等獎"), quantity: 15 },
+
+  { id: "luck-01", title: bi("Giải May Mắn", "幸運獎"), quantity: 25 },
+  { id: "luck-02", title: bi("Giải May Mắn", "幸運獎"), quantity: 20 },
+
+  { id: "fun-01", title: bi("Giải Vui Vẻ", "歡樂獎"), quantity: 20 },
+  { id: "fun-02", title: bi("Giải Vui Vẻ", "歡樂獎"), quantity: 20 },
+  { id: "fun-03", title: bi("Giải Vui Vẻ", "歡樂獎"), quantity: 20 },
 ];
+
+// ✅ Map ID cũ -> ID mới (giữ dữ liệu localStorage không bị mất)
+const PRIZE_ID_MIGRATION: Record<string, string> = {
+  "p-special": "sp-01",
+  "p-special2": "sp-02",
+
+  "p-diamond": "1st-01",
+  "p-gold": "2nd-01",
+  "p-silver": "3rd-01",
+
+  "p-bronze": "4th-01",
+  "p-bronze2": "4th-02",
+
+  "p-lucky": "luck-01",
+  "p-lucky2": "luck-02",
+
+  "p-happy": "fun-01",
+  "p-happy2": "fun-02",
+  "p-happy3": "fun-03",
+};
+
+// ✅ helper: giải đặc biệt
+const isSpecialPrize = (p: Prize | null) => !!p && (p.id === "sp-01" || p.id === "sp-02");
 
 // ✅ helper detect "Giải cao nhất" để bắn mega fireworks
 const isFirstPrizeTitle = (title: string) => {
@@ -179,9 +211,14 @@ const isFirstPrizeTitle = (title: string) => {
     t.includes("giai dac biet") ||
     title.includes("一等") ||
     title.includes("一等獎") ||
+    title.includes("特別") || // cover 特別獎 / 特別大獎
+    title.includes("特別獎") ||
     title.includes("特別大獎")
   );
 };
+
+// ✅ thời gian rolling theo giải (special = 30s)
+const getRollDurationMs = (p: Prize) => (isSpecialPrize(p) ? 30_000 : 2_000);
 
 export default function Page() {
   const isMobile = useMediaQuery("(max-width:600px)");
@@ -193,8 +230,7 @@ export default function Page() {
   // ✅ luôn khởi tạo từ DEFAULT
   const [prizes, setPrizes] = useState<Prize[]>(DEFAULT_PRIZES);
 
-  const [selectedPrizeId, setSelectedPrizeId] =
-    useState<string | null>(null);
+  const [selectedPrizeId, setSelectedPrizeId] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [seed, setSeed] = useState<number>(() => Date.now());
   const [rollingName, setRollingName] = useState<string>("");
@@ -205,9 +241,9 @@ export default function Page() {
   // ===== SECRET / ADMIN =====
   const [adminMode, setAdminMode] = useState(false);
   const [adminPin, setAdminPin] = useState("2025");
-  const [presetsByPrize, setPresetsByPrize] = useState<
-    Record<string, string>
-  >({});
+  const [presetsByPrize, setPresetsByPrize] = useState<Record<string, string>>(
+    {}
+  );
   const [adminPrizeId, setAdminPrizeId] = useState<string | null>(null);
 
   // ===== PRO SESSION (live winners during draw) =====
@@ -219,6 +255,7 @@ export default function Page() {
     setMounted(true);
 
     const s = loadState();
+
     if (!s) {
       // ✅ Không có storage -> dùng DEFAULT
       setPrizes(DEFAULT_PRIZES);
@@ -226,32 +263,55 @@ export default function Page() {
       setAdminPrizeId(DEFAULT_PRIZES[0]?.id ?? null);
     } else {
       setParticipantsText(s.participantsText ?? "");
-      setHistory(s.history ?? []);
       setSeed(s.seed ?? Date.now());
 
-      // ✅ merge DEFAULT + saved prizes
-      const saved = s.prizes ?? [];
-      const savedMap = new Map(saved.map((p) => [p.id, p]));
+      // ===== MIGRATE PRIZES =====
+      const migratedPrizes = (s.prizes ?? []).map((p) => ({
+        ...p,
+        id: PRIZE_ID_MIGRATION[p.id] ?? p.id,
+      }));
+
+      const prizeMap = new Map(migratedPrizes.map((p) => [p.id, p]));
 
       // giữ default luôn tồn tại
-      const mergedDefaults = DEFAULT_PRIZES.map((d) => savedMap.get(d.id) ?? d);
+      const mergedDefaults = DEFAULT_PRIZES.map((d) => prizeMap.get(d.id) ?? d);
 
       // các giải user tự thêm (không thuộc default) vẫn được giữ
-      const extraCustom = saved.filter(
+      const extraCustom = migratedPrizes.filter(
         (p) => !DEFAULT_PRIZES.some((d) => d.id === p.id)
       );
 
       const finalPrizes = [...mergedDefaults, ...extraCustom];
       setPrizes(finalPrizes);
 
-      setSelectedPrizeId(s.selectedPrizeId ?? finalPrizes[0]?.id ?? null);
-      setAdminPrizeId(s.selectedPrizeId ?? finalPrizes[0]?.id ?? null);
+      // ===== MIGRATE HISTORY =====
+      const migratedHistory = (s.history ?? []).map((h) => ({
+        ...h,
+        prizeId: PRIZE_ID_MIGRATION[h.prizeId] ?? h.prizeId,
+      }));
+      setHistory(migratedHistory);
+
+      // ===== MIGRATE SELECTED =====
+      const migratedSelected =
+        PRIZE_ID_MIGRATION[s.selectedPrizeId ?? ""] ??
+        s.selectedPrizeId ??
+        finalPrizes[0]?.id ??
+        null;
+
+      setSelectedPrizeId(migratedSelected);
+      setAdminPrizeId(migratedSelected);
     }
 
     const ss = loadSecretState();
     if (ss) {
+      // migrate preset keys theo id mới
+      const migratedPresets: Record<string, string> = {};
+      for (const [k, v] of Object.entries(ss.presetsByPrize ?? {})) {
+        const nk = PRIZE_ID_MIGRATION[k] ?? k;
+        migratedPresets[nk] = v;
+      }
       setAdminPin(ss.adminPin || "2025");
-      setPresetsByPrize(ss.presetsByPrize || {});
+      setPresetsByPrize(migratedPresets);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -581,6 +641,15 @@ export default function Page() {
       return;
     }
 
+    // ✅ Nhắc riêng khi bốc giải đặc biệt
+    if (isSpecialPrize(selectedPrize)) {
+      setToast({
+        open: true,
+        msg: bi("⚡ Mời 2 người lên bốc Giải Đặc Biệt!", "⚡ 請兩位上台抽特別獎!"),
+        sev: "info",
+      });
+    }
+
     setIsDrawing(true);
     setSessionWinners([]);
     setSessionPrizeTitle(selectedPrize.title);
@@ -610,14 +679,23 @@ export default function Page() {
         } catch {}
       }
 
-      // Rolling ~2s
+      // ✅ Rolling (special = 30s, others = 2s) — tối ưu re-render
+      const rollDuration = getRollDurationMs(selectedPrize);
       const t0 = Date.now();
-      while (Date.now() - t0 < 2000) {
+      let nextUi = 0;
+      const uiInterval = rollDuration >= 10_000 ? 120 : 70;
+
+      while (Date.now() - t0 < rollDuration) {
         const r1 = seededRandom(tmpSeed);
         tmpSeed = r1.nextSeed;
-        const r = pool[Math.floor(r1.value * pool.length)];
-        setRollingName(r.name);
-        await sleep(60);
+
+        if (Date.now() >= nextUi) {
+          const r = pool[Math.floor(r1.value * pool.length)];
+          setRollingName(r.name);
+          nextUi = Date.now() + uiInterval;
+        }
+
+        await sleep(16);
       }
 
       let w: Participant | undefined;
@@ -699,7 +777,7 @@ export default function Page() {
       ...h,
     ]);
 
-    // ✅ mega fireworks chỉ khi bốc xong giải cao nhất
+    // ✅ mega fireworks khi giải cao nhất
     if (isFirstPrizeTitle(selectedPrize.title)) {
       megaFireworks();
     } else {
@@ -770,9 +848,7 @@ export default function Page() {
   };
 
   const updatePrize = (id: string, patch: Partial<Prize>) =>
-    setPrizes((ps) =>
-      ps.map((p) => (p.id === id ? { ...p, ...patch } : p))
-    );
+    setPrizes((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
 
   const removePrize = (id: string) => {
     setPrizes((ps) => ps.filter((p) => p.id !== id));
@@ -863,10 +939,7 @@ export default function Page() {
                 />
                 <Chip
                   color="default"
-                  label={bi(
-                    `${history.length} lượt bốc`,
-                    `${history.length} 次抽獎`
-                  )}
+                  label={bi(`${history.length} lượt bốc`, `${history.length} 次抽獎`)}
                   variant="outlined"
                   sx={{ mr: 1, bgcolor: "rgba(255,255,255,.04)" }}
                 />
@@ -981,8 +1054,7 @@ export default function Page() {
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         if (f) importParticipantsCSV(f);
-                        if (uploadInputRef.current)
-                          uploadInputRef.current.value = "";
+                        if (uploadInputRef.current) uploadInputRef.current.value = "";
                       }}
                     />
                     <Button
@@ -1009,20 +1081,13 @@ export default function Page() {
                       >
                         {bi("Tắt Admin", "關閉管理")}
                       </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={changePin}
-                      >
+                      <Button size="small" variant="outlined" onClick={changePin}>
                         {bi("Đổi PIN", "更改PIN")}
                       </Button>
                       <Chip
                         size="small"
                         color="secondary"
-                        label={bi(
-                          `PIN hiện tại: ${adminPin}`,
-                          `目前PIN：${adminPin}`
-                        )}
+                        label={bi(`PIN hiện tại: ${adminPin}`, `目前PIN：${adminPin}`)}
                       />
                     </Stack>
 
@@ -1050,20 +1115,12 @@ export default function Page() {
                       </Select>
                     </FormControl>
 
-                    <Typography
-                      variant="subtitle2"
-                      fontWeight={900}
-                      mt={1.5}
-                      mb={1}
-                    >
+                    <Typography variant="subtitle2" fontWeight={900} mt={1.5} mb={1}>
                       {bi("Danh sách ưu tiên trúng (GIẤU)", "優先中獎名單（隱藏）")}
                     </Typography>
 
                     <TextField
-                      label={bi(
-                        "Mỗi dòng 1 người (mã hoặc tên)",
-                        "每行1人（工號或姓名）"
-                      )}
+                      label={bi("Mỗi dòng 1 người (mã hoặc tên)", "每行1人（工號或姓名）")}
                       value={currentAdminPresetText}
                       onChange={(e) => {
                         if (!adminPrizeId) return;
@@ -1102,12 +1159,7 @@ export default function Page() {
                     boxShadow: "0 12px 40px rgba(0,0,0,.55)",
                   }}
                 >
-                  <Stack
-                    direction="row"
-                    justifyContent="space-between"
-                    alignItems="center"
-                    mb={1}
-                  >
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
                     <Typography variant="subtitle1" fontWeight={900}>
                       {bi("Danh sách giải", "獎項列表")}
                     </Typography>
@@ -1131,24 +1183,17 @@ export default function Page() {
                           variant="outlined"
                           sx={{
                             borderColor:
-                              selectedPrizeId === p.id
-                                ? "primary.main"
-                                : "divider",
+                              selectedPrizeId === p.id ? "primary.main" : "divider",
                             opacity: isDrawn ? 0.6 : 1,
                             bgcolor: "rgba(255,255,255,.02)",
                           }}
                         >
                           <CardContent sx={{ "&:last-child": { pb: 2 } }}>
-                            <Stack
-                              direction={{ xs: "column", sm: "row" }}
-                              spacing={1}
-                            >
+                            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
                               <TextField
                                 label={bi("Tên giải", "獎項名稱")}
                                 value={p.title}
-                                onChange={(e) =>
-                                  updatePrize(p.id, { title: e.target.value })
-                                }
+                                onChange={(e) => updatePrize(p.id, { title: e.target.value })}
                                 size="small"
                                 fullWidth
                               />
@@ -1158,21 +1203,14 @@ export default function Page() {
                                 value={p.quantity}
                                 onChange={(e) =>
                                   updatePrize(p.id, {
-                                    quantity: Math.max(
-                                      1,
-                                      Number(e.target.value)
-                                    ),
+                                    quantity: Math.max(1, Number(e.target.value)),
                                   })
                                 }
                                 size="small"
                                 sx={{ width: { xs: "100%", sm: 120 } }}
                                 inputProps={{ min: 1 }}
                               />
-                              <IconButton
-                                aria-label="delete prize"
-                                color="error"
-                                onClick={() => removePrize(p.id)}
-                              >
+                              <IconButton aria-label="delete prize" color="error" onClick={() => removePrize(p.id)}>
                                 <DeleteOutlineIcon />
                               </IconButton>
                             </Stack>
@@ -1181,21 +1219,12 @@ export default function Page() {
                               <Button
                                 size="small"
                                 variant="text"
-                                onClick={() =>
-                                  !isDrawn && setSelectedPrizeId(p.id)
-                                }
+                                onClick={() => !isDrawn && setSelectedPrizeId(p.id)}
                                 disabled={isDrawn}
                               >
                                 {isDrawn ? (
-                                  <Stack
-                                    direction="row"
-                                    alignItems="center"
-                                    spacing={0.5}
-                                  >
-                                    <CheckCircleIcon
-                                      fontSize="small"
-                                      color="success"
-                                    />{" "}
+                                  <Stack direction="row" alignItems="center" spacing={0.5}>
+                                    <CheckCircleIcon fontSize="small" color="success" />{" "}
                                     {bi("Đã bốc xong", "已抽完")}
                                   </Stack>
                                 ) : (
@@ -1226,12 +1255,8 @@ export default function Page() {
                     {bi("Bốc thăm", "抽獎")}
                   </Typography>
 
-                  <Stack direction="row" alignItems="center" spacing={1} mb={1}>
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      component="span"
-                    >
+                  <Stack direction="row" alignItems="center" spacing={1} mb={1} flexWrap="wrap">
+                    <Typography variant="body2" color="text.secondary" component="span">
                       {bi("Giải đang bốc:", "正在抽獎：")}
                     </Typography>
                     {selectedPrize ? (
@@ -1242,6 +1267,16 @@ export default function Page() {
                       />
                     ) : (
                       <Chip label={bi("Chưa chọn", "未選擇")} size="small" />
+                    )}
+
+                    {/* ✅ Nhắc 2 người lên bốc khi giải đặc biệt */}
+                    {selectedPrize && isSpecialPrize(selectedPrize) && (
+                      <Chip
+                        size="small"
+                        color="secondary"
+                        sx={{ fontWeight: 900 }}
+                        label={bi("⚡ Mời 2 người lên bốc Giải Đặc Biệt", "⚡ 請兩位上台抽特別獎")}
+                      />
                     )}
                   </Stack>
 
@@ -1281,10 +1316,7 @@ export default function Page() {
                         {rollingName}
                       </Typography>
                     ) : (
-                      <Typography
-                        variant={isMobile ? "subtitle1" : "h6"}
-                        color="text.disabled"
-                      >
+                      <Typography variant={isMobile ? "subtitle1" : "h6"} color="text.disabled">
                         {bi("Sẵn sàng!", "準備好了!")}
                       </Typography>
                     )}
@@ -1315,11 +1347,7 @@ export default function Page() {
                       startIcon={<PlayCircleOutlineIcon />}
                       size={isMobile ? "medium" : "large"}
                       onClick={startRoll}
-                      disabled={
-                        !selectedPrize ||
-                        isDrawing ||
-                        drawnPrizeIds.has(selectedPrize.id)
-                      }
+                      disabled={!selectedPrize || isDrawing || (selectedPrize ? drawnPrizeIds.has(selectedPrize.id) : false)}
                       sx={{
                         background:
                           "linear-gradient(90deg, #7C3AED 0%, #22D3EE 50%, #EC4899 100%)",
@@ -1346,52 +1374,26 @@ export default function Page() {
 
                   <Divider sx={{ my: 2 }} />
 
-                  <Stack
-                    direction="row"
-                    justifyContent="space-between"
-                    alignItems="center"
-                    spacing={1}
-                  >
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
                     <Typography variant="subtitle2" fontWeight={900}>
                       {bi("Lịch sử trúng thưởng", "中獎紀錄")}
                     </Typography>
                     <Stack direction="row" spacing={1}>
-                      <Button
-                        size="small"
-                        variant="text"
-                        startIcon={<DownloadIcon />}
-                        onClick={exportHistoryExcel}
-                      >
+                      <Button size="small" variant="text" startIcon={<DownloadIcon />} onClick={exportHistoryExcel}>
                         {bi("Export Excel", "匯出Excel")}
                       </Button>
-                      <Button
-                        size="small"
-                        color="error"
-                        variant="outlined"
-                        onClick={undoLast}
-                      >
+                      <Button size="small" color="error" variant="outlined" onClick={undoLast}>
                         {bi("↩️ Undo", "↩️ 撤銷")}
                       </Button>
                     </Stack>
                   </Stack>
 
                   {history.length === 0 ? (
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      sx={{ mt: 1 }}
-                    >
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                       {bi("Chưa có lượt bốc.", "尚無抽獎紀錄。")}
                     </Typography>
                   ) : (
-                    <List
-                      dense
-                      sx={{
-                        mt: 1,
-                        maxHeight: { xs: 260, md: 360 },
-                        overflow: "auto",
-                      }}
-                    >
+                    <List dense sx={{ mt: 1, maxHeight: { xs: 260, md: 360 }, overflow: "auto" }}>
                       {history.map((h, i) => (
                         <ListItem
                           key={h.time + i}
@@ -1405,30 +1407,18 @@ export default function Page() {
                           <ListItemText
                             disableTypography
                             primary={
-                              <Box
-                                display="flex"
-                                justifyContent="space-between"
-                                alignItems="center"
-                              >
+                              <Box display="flex" justifyContent="space-between" alignItems="center">
                                 <Typography fontWeight={800} component="span">
                                   {h.prizeTitle}
                                 </Typography>
-                                <Typography
-                                  variant="caption"
-                                  color="text.secondary"
-                                  component="span"
-                                >
+                                <Typography variant="caption" color="text.secondary" component="span">
                                   {new Date(h.time).toLocaleString()}
                                 </Typography>
                               </Box>
                             }
                             secondary={
                               <Box>
-                                <Typography
-                                  variant="caption"
-                                  color="text.secondary"
-                                  component="div"
-                                >
+                                <Typography variant="caption" color="text.secondary" component="div">
                                   Seed: {h.seedUsed}
                                 </Typography>
                                 <Box component="ul" sx={{ pl: 3, mt: 0.5, mb: 0 }}>
@@ -1465,21 +1455,11 @@ export default function Page() {
             elevation={0}
           >
             <Toolbar>
-              <IconButton
-                edge="start"
-                color="inherit"
-                onClick={() => setPresentOpen(false)}
-                aria-label="close"
-              >
+              <IconButton edge="start" color="inherit" onClick={() => setPresentOpen(false)} aria-label="close">
                 <CloseIcon />
               </IconButton>
 
-              <Stack
-                direction="row"
-                alignItems="center"
-                spacing={1.5}
-                sx={{ ml: 1, flex: 1 }}
-              >
+              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ ml: 1, flex: 1 }}>
                 <Box
                   component="img"
                   src="/coolermaster-logo.png"
@@ -1494,8 +1474,7 @@ export default function Page() {
                   sx={{
                     fontWeight: 900,
                     letterSpacing: 1,
-                    background:
-                      "linear-gradient(90deg,#22D3EE,#7C3AED,#EC4899)",
+                    background: "linear-gradient(90deg,#22D3EE,#7C3AED,#EC4899)",
                     WebkitBackgroundClip: "text",
                     WebkitTextFillColor: "transparent",
                     display: { xs: "none", sm: "block" },
@@ -1529,15 +1508,9 @@ export default function Page() {
                   }}
                 >
                   {prizes.map((p) => (
-                    <MenuItem
-                      key={p.id}
-                      value={p.id}
-                      disabled={drawnPrizeIds.has(p.id)}
-                    >
+                    <MenuItem key={p.id} value={p.id} disabled={drawnPrizeIds.has(p.id)}>
                       {p.title} {!!p.quantity && `(${p.quantity})`}
-                      {drawnPrizeIds.has(p.id)
-                        ? bi(" — đã bốc xong", " — 已抽完")
-                        : ""}
+                      {drawnPrizeIds.has(p.id) ? bi(" — đã bốc xong", " — 已抽完") : ""}
                     </MenuItem>
                   ))}
                 </Select>
@@ -1547,11 +1520,7 @@ export default function Page() {
                 color="inherit"
                 startIcon={<PlayCircleOutlineIcon />}
                 onClick={startRoll}
-                disabled={
-                  !selectedPrize ||
-                  isDrawing ||
-                  (selectedPrize ? drawnPrizeIds.has(selectedPrize.id) : false)
-                }
+                disabled={!selectedPrize || isDrawing || (selectedPrize ? drawnPrizeIds.has(selectedPrize.id) : false)}
                 sx={{ fontWeight: 900 }}
               >
                 {bi("Bốc ngay", "立即抽獎")}
@@ -1596,16 +1565,9 @@ export default function Page() {
               }}
             >
               {/* Header chips */}
-              <Stack
-                direction="row"
-                justifyContent="space-between"
-                alignItems="center"
-              >
+              <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
                 <Chip
-                  label={bi(
-                    `${participants.length} người tham gia`,
-                    `${participants.length} 位參與者`
-                  )}
+                  label={bi(`${participants.length} người tham gia`, `${participants.length} 位參與者`)}
                   sx={{
                     borderRadius: 2,
                     bgcolor: "rgba(255,255,255,.06)",
@@ -1630,6 +1592,20 @@ export default function Page() {
                   />
                 ) : (
                   <Chip label={bi("Chưa chọn giải", "未選擇獎項")} />
+                )}
+
+                {/* ✅ Nhắc 2 người lên bốc khi giải đặc biệt */}
+                {selectedPrize && isSpecialPrize(selectedPrize) && (
+                  <Chip
+                    sx={{
+                      borderRadius: 2,
+                      bgcolor: "rgba(34,211,238,.12)",
+                      color: "white",
+                      border: "1px solid rgba(34,211,238,.35)",
+                      fontWeight: 900,
+                    }}
+                    label={bi("⚡ Mời 2 người lên bốc Giải Đặc Biệt", "⚡ 請兩位上台抽特別獎")}
+                  />
                 )}
               </Stack>
 
@@ -1672,8 +1648,7 @@ export default function Page() {
                       sx={{
                         fontSize: "clamp(64px, 16vw, 180px)",
                         fontWeight: 900,
-                        background:
-                          "linear-gradient(90deg,#22D3EE,#7C3AED,#EC4899)",
+                        background: "linear-gradient(90deg,#22D3EE,#7C3AED,#EC4899)",
                         WebkitBackgroundClip: "text",
                         WebkitTextFillColor: "transparent",
                         textShadow: "0 6px 30px rgba(0,0,0,.6)",
@@ -1716,8 +1691,7 @@ export default function Page() {
                         fontWeight: 900,
                         mb: { xs: 1.5, md: 2.5 },
                         letterSpacing: 1.2,
-                        background:
-                          "linear-gradient(90deg,#22D3EE,#7C3AED,#EC4899)",
+                        background: "linear-gradient(90deg,#22D3EE,#7C3AED,#EC4899)",
                         WebkitBackgroundClip: "text",
                         WebkitTextFillColor: "transparent",
                         textShadow: "0 6px 26px rgba(124,58,237,.45)",
@@ -1731,8 +1705,7 @@ export default function Page() {
                         display: "grid",
                         gridTemplateColumns: {
                           xs: "1fr",
-                          sm:
-                            sessionWinners.length >= 2 ? "1fr 1fr" : "1fr",
+                          sm: sessionWinners.length >= 2 ? "1fr 1fr" : "1fr",
                           md:
                             sessionWinners.length >= 3
                               ? "1fr 1fr 1fr"
@@ -1784,8 +1757,7 @@ export default function Page() {
                         fontWeight: 900,
                         mb: { xs: 1.5, md: 2.5 },
                         letterSpacing: 1.2,
-                        background:
-                          "linear-gradient(90deg,#22D3EE,#7C3AED,#EC4899)",
+                        background: "linear-gradient(90deg,#22D3EE,#7C3AED,#EC4899)",
                         WebkitBackgroundClip: "text",
                         WebkitTextFillColor: "transparent",
                         textShadow: "0 6px 26px rgba(124,58,237,.45)",
@@ -1858,21 +1830,13 @@ export default function Page() {
               </Box>
 
               {/* Actions */}
-              <Stack
-                direction={{ xs: "column", sm: "row" }}
-                spacing={2}
-                justifyContent="center"
-              >
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="center">
                 <Button
                   variant="contained"
                   size="large"
                   startIcon={<PlayCircleOutlineIcon />}
                   onClick={startRoll}
-                  disabled={
-                    !selectedPrize ||
-                    isDrawing ||
-                    (selectedPrize ? drawnPrizeIds.has(selectedPrize.id) : false)
-                  }
+                  disabled={!selectedPrize || isDrawing || (selectedPrize ? drawnPrizeIds.has(selectedPrize.id) : false)}
                   sx={{
                     background:
                       "linear-gradient(90deg, #7C3AED 0%, #22D3EE 50%, #EC4899 100%)",
